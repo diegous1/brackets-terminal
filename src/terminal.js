@@ -5,13 +5,57 @@ define(function (require, exports, module) {
         io = require('vendor/socket-io'),
         Terminal = require('vendor/tty');
 
+    // Security: Dangerous command patterns to warn about
+    var DANGEROUS_PATTERNS = [
+        /rm\s+-rf\s+\//, // rm -rf /
+        /rm\s+-rf\s+~/, // rm -rf ~
+        /:\(\)\{\s*:\|:\&\s*\};:/, // fork bomb
+        />\/dev\/sda/, // overwrite disk
+        /dd\s+if=\/dev\/zero\s+of=\/dev\/sda/, // wipe disk
+        /mkfs/, // format disk
+        /chmod\s+-R\s+777\s+\//, // chmod 777 root
+        /wget.*\|.*sh/, // download and execute
+        /curl.*\|.*sh/, // download and execute
+        /eval\s*\(/, // eval injection
+        /`.*`/ // command substitution
+    ];
+
+    // Sanitize and validate commands
+    function sanitizeCommand(command) {
+        if (!command || typeof command !== 'string') {
+            return '';
+        }
+
+        // Trim and limit command length to prevent buffer overflow
+        command = command.trim().substring(0, 10000);
+
+        // Check for dangerous patterns
+        for (var i = 0; i < DANGEROUS_PATTERNS.length; i++) {
+            if (DANGEROUS_PATTERNS[i].test(command)) {
+                console.warn('[Terminal Security] Potentially dangerous command detected:', command.substring(0, 100));
+                // Don't block, just warn - user has full control of their system
+                break;
+            }
+        }
+
+        return command;
+    }
+
     terminalProto.connectHandler = function connectHandler() {
         $(this).trigger('connected');
         this.registerSocketHandler();
     };
 
     terminalProto.command = function (terminalId, command) {
-        this.socket.emit('data', terminalId, command + '\n');
+        // Sanitize command before sending
+        var sanitizedCommand = sanitizeCommand(command);
+        
+        if (!sanitizedCommand) {
+            console.error('[Terminal] Invalid command');
+            return;
+        }
+
+        this.socket.emit('data', terminalId, sanitizedCommand + '\n');
         this.terminals[terminalId].focus();
     };
 
@@ -26,6 +70,7 @@ define(function (require, exports, module) {
         term.on('title', function (title) {
             $(this).trigger('title', [data.id, title]);
         }.bind(this));
+
         this.registerDataHandler(data.id);
 
         this.socket.on('kill', function () {
@@ -41,6 +86,7 @@ define(function (require, exports, module) {
         this.socket.on('reconnect_failed', function () {
             this.clear();
         });
+
         this.blurAll();
         $(this).trigger('created', data.id);
     };
@@ -58,6 +104,7 @@ define(function (require, exports, module) {
             width = $bashPanel.width();
             height -= $bashPanel.find('.toolbar').height() + 10; //5px top/bottom border to remove
             width -= 10; // same here :)
+
             var $span = $('<span>X</span>');
             $span.css({
                 position: 'absolute',
@@ -67,19 +114,19 @@ define(function (require, exports, module) {
             fontSize = $span.width();
             lineHeight = $span.outerHeight(true);
             $span.remove();
+
             lineHeight = parseInt(lineHeight, 10);
             fontSize = parseInt(fontSize, 10);
+
             rows = Math.floor(height / lineHeight);
             cols = Math.floor(width / fontSize);
 
             this.socket.emit('resize', terminalId, cols, rows);
-
-
             this.terminals[terminalId].resize(cols, rows);
             this.terminals[terminalId].showCursor(this.terminals[terminalId].x, this.terminals[terminalId].y);
         }
-
     };
+
     terminalProto.focus = function (terminalId) {
         if (this.terminals[terminalId]) {
             this.terminals[terminalId].focus();
@@ -91,11 +138,13 @@ define(function (require, exports, module) {
             this.terminals[termId].blur();
         }
     };
+
     terminalProto.blur = function (terminalId) {
         if (this.terminals[terminalId]) {
             this.terminals[terminalId].blur();
         }
     };
+
     terminalProto.registerDataHandler = function (terminalId) {
         var that = this;
         var emit = function (id) {
@@ -103,6 +152,7 @@ define(function (require, exports, module) {
                 that.socket.emit('data', id, data);
             };
         };
+
         this.terminals[terminalId].on('data', emit(terminalId));
     };
 
@@ -117,7 +167,6 @@ define(function (require, exports, module) {
             this.socket.emit('kill', terminalId);
             this.terminals[terminalId].destroy();
             delete this.terminals[terminalId];
-
         }
     };
 
@@ -128,7 +177,7 @@ define(function (require, exports, module) {
     };
 
     terminalProto.clear = function () {
-        //        this.id = undefined;
+        // this.id = undefined;
     };
 
     terminalProto.clearHandler = function () {
@@ -145,31 +194,35 @@ define(function (require, exports, module) {
         if (typeof host !== 'string') {
             host = 'http://localhost:8080';
         }
+
         if (this.socket) {
             if (!this.socket.socket.connected) {
                 this.socket.socket.connect();
             }
             return;
         }
+
         this.socket = io.connect(host, {
             force: true
         });
+
         this.socket.on('error', function () {
             this.clear();
             $(this).trigger('notConnected');
         }.bind(this));
+
         this.socket.on('connect', this.connectHandler.bind(this));
     };
-
 
     terminalProto.createTerminal = function (cols, rows) {
         if (!this.socket.socket.connected) {
             throw new Error('Unable to create terminal without a connection');
         }
-        this.terminals = this.terminals || {};
 
+        this.terminals = this.terminals || {};
         cols = cols || 80;
         rows = rows || 24;
+
         this.socket.emit('create', cols, rows, this.createHandler.bind(this));
     };
 
