@@ -1,6 +1,5 @@
 define(function (require, exports) {
     'use strict';
-
     var PreferencesManager = brackets.getModule('preferences/PreferencesManager'),
         Mustache = brackets.getModule('thirdparty/mustache/mustache'),
         Dialogs = brackets.getModule('widgets/Dialogs'),
@@ -9,10 +8,53 @@ define(function (require, exports) {
     var TERMINAL_SETTINGS_CLIENT_ID = 'bracketsTerminal',
         SETTINGS = 'settings';
     
-    var defaults = {
-        port: 8080,
-        fontSize: 15
+    // Validation constraints
+    var CONSTRAINTS = {
+        port: {
+            min: 1024,  // Avoid privileged ports
+            max: 65535,
+            default: 8080
+        },
+        fontSize: {
+            min: 8,     // Minimum readable size
+            max: 72,    // Maximum reasonable size
+            default: 15
+        }
     };
+
+    var defaults = {
+        port: CONSTRAINTS.port.default,
+        fontSize: CONSTRAINTS.fontSize.default
+    };
+
+    // Validate individual setting value
+    function validateSetting(key, value) {
+        if (!CONSTRAINTS[key]) {
+            return value;
+        }
+
+        var constraint = CONSTRAINTS[key];
+        var numValue = parseInt(value, 10);
+
+        // Check if valid number
+        if (isNaN(numValue)) {
+            console.warn('[Terminal Settings] Invalid ' + key + ' value:', value, '- using default:', constraint.default);
+            return constraint.default;
+        }
+
+        // Clamp to valid range
+        if (numValue < constraint.min) {
+            console.warn('[Terminal Settings] ' + key + ' too small:', numValue, '- using minimum:', constraint.min);
+            return constraint.min;
+        }
+
+        if (numValue > constraint.max) {
+            console.warn('[Terminal Settings] ' + key + ' too large:', numValue, '- using maximum:', constraint.max);
+            return constraint.max;
+        }
+
+        return numValue;
+    }
 
     var prefs = PreferencesManager.getExtensionPrefs(TERMINAL_SETTINGS_CLIENT_ID);
     prefs.definePreference('settings', 'object', undefined, {
@@ -36,7 +78,8 @@ define(function (require, exports) {
             if (typeof value === 'undefined') {
                 value = defaults[key];
             }
-            settings[key] = value;
+            // Validate on read
+            settings[key] = validateSetting(key, value);
         });
 
         return settings;
@@ -49,6 +92,9 @@ define(function (require, exports) {
             var value = newSettings[key];
             if (typeof value === 'undefined') {
                 newSettings[key] = oldSettings[key];
+            } else {
+                // Validate on write
+                newSettings[key] = validateSetting(key, value);
             }
         });
 
@@ -77,7 +123,7 @@ define(function (require, exports) {
     };
 
     var _set = function (key, value) {
-        settings[key] = value;
+        settings[key] = validateSetting(key, value);
         _setAllValues(settings);
         settings = _getAllValues();
     };
