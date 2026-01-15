@@ -1,19 +1,31 @@
 {
-    "name": "brackets-terminal",
-    "title": "Brackets Terminal",
-    "version": "0.4.0",
-    "description": "Open a terminal inside Brackets",
-    "main": "main.js",
-    "homepage": "https://github.com/artoale/brackets-terminal",
-    "keywords": [
-        "terminal",
-        "bash",
-        "zsh",
-        "tty"
-    ],
-    "author": "Alessandro Artoni <artoale@gmail.com> (http://artoale.com)",
-    "license": "MIT",
-    "engines": {
-        "brackets": "^1.8.0"
-    }
+  "name": "github-diegous1-brackets-terminal",
+  "title": "Brackets Terminal",
+  "version": "0.5.0",
+  "description": "Open a terminal inside Phoenix Code / Brackets",
+  "main": "main.js",
+  "homepage": "https://github.com/diegous1/brackets-terminal",
+  "keywords": [
+    "terminal",
+    "bash",
+    "zsh",
+    "tty",
+    "console",
+    "shell"
+  ],
+  "author": "Alessandro Artoni <artoale@gmail.com> (http://artoale.com)",
+  "license": "MIT",
+  "engines": {
+    "brackets": ">=3.0.0"
+  },
+  "categories": ["general"],
+  "files": [
+    "main.js",
+    "src/",
+    "fonts/",
+    "htmlContent/",
+    "images/",
+    "vendor/",
+    "terminal.css"
+  ]
 }
