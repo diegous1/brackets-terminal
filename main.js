@@ -1,7 +1,6 @@
 define(function (require, exports, module) {
     'use strict';
 
-
     var CommandManager = brackets.getModule('command/CommandManager'),
         Menus = brackets.getModule('command/Menus'),
         AppInit = brackets.getModule('utils/AppInit'),
@@ -13,15 +12,18 @@ define(function (require, exports, module) {
         terminalManager = require('src/terminal')(),
         shortcut = require('src/shortcut')(terminalManager.command.bind(terminalManager));
 
-
-
     var TERMINAL_COMMAND_ID = 'artoale.terminal.open';
-
     var TERMINAL_SETTINGS_COMMAND_ID = 'artoale.terminal.settings';
 
     var openTerminalCommand = null;
-
     var currentTerminal = null;
+    var serverCheckAttempts = 0;
+    var MAX_SERVER_CHECK_ATTEMPTS = 3;
+
+    // Detect if running in Phoenix Code
+    function isPhoenixCode() {
+        return (typeof Phoenix !== 'undefined' || window.Phoenix);
+    }
 
     var createNewTerminal = function (terminalId) {
         var $terminal = panel.addTab(terminalId);
@@ -42,11 +44,50 @@ define(function (require, exports, module) {
         resize();
     }
 
-    function init() {
+    function checkTtyServer(callback) {
+        var serverUrl = 'http://localhost:' + settings.get('port');
+        
+        $.ajax({
+            url: serverUrl + '/terminals',
+            type: 'GET',
+            timeout: 3000,
+            success: function() {
+                serverCheckAttempts = 0;
+                if (callback) callback(true);
+            },
+            error: function(xhr, status, error) {
+                serverCheckAttempts++;
+                console.error('Terminal server connection error:', error);
+                
+                if (serverCheckAttempts >= MAX_SERVER_CHECK_ATTEMPTS) {
+                    toolbarManager.setStatus(toolbarManager.ERROR);
+                    var message = isPhoenixCode() ? 
+                        'Terminal server não está rodando. Instale o tty.js globalmente com: npm install -g tty.js' :
+                        'Terminal server is not running. Install tty.js globally: npm install -g tty.js';
+                    console.error(message);
+                    if (callback) callback(false);
+                } else {
+                    setTimeout(function() {
+                        checkTtyServer(callback);
+                    }, 2000);
+                }
+            }
+        });
+    }
 
+    function init() {
         toolbarManager.setStatus(toolbarManager.NOT_RUNNING);
         terminalManager.clear();
-        terminalManager.startConnection('http://localhost:' + settings.get('port'));
+        
+        // Check if server is available before attempting connection
+        checkTtyServer(function(success) {
+            if (success) {
+                terminalManager.startConnection('http://localhost:' + settings.get('port'));
+                toolbarManager.setStatus(toolbarManager.ACTIVE);
+            } else {
+                console.error('Failed to connect to terminal server after ' + MAX_SERVER_CHECK_ATTEMPTS + ' attempts');
+            }
+        });
 
         $(panel).on('close', function () {
             handleAction();
@@ -57,38 +98,43 @@ define(function (require, exports, module) {
                 shortcut[command](currentTerminal);
                 return;
             }
+
             var action = command;
             if (action && action === 'font-plus') {
                 addToFontSize(1);
             } else if (action && action === 'font-minus') {
                 addToFontSize(-1);
             } else if (action && action === 'new-terminal') {
-                terminalManager.createTerminal();
+                // Fix for issue #43: Check if terminal is already being created
+                if (!terminalManager.isCreating) {
+                    terminalManager.createTerminal();
+                }
             }
         });
     }
 
     function handleAction(keepActive) {
-        if (toolbarManager.status === toolbarManager.ACTIVE) {
+        if (toolbarManager.status === toolbarManager.NOT_RUNNING) {
             panel.toggle();
             toolbarManager.setStatus(toolbarManager.NOT_ACTIVE);
             terminalManager.blur(currentTerminal);
         } else if (toolbarManager.status === toolbarManager.NOT_ACTIVE) {
             panel.toggle();
-//            resize(currentTerminal);
+            //  resize(currentTerminal);
             terminalManager.focus(currentTerminal);
             toolbarManager.setStatus(toolbarManager.ACTIVE);
         } else if (toolbarManager.status === toolbarManager.NOT_CONNECTED || toolbarManager.status === toolbarManager.NOT_RUNNING) {
             init();
         } else if (toolbarManager.status === toolbarManager.CONNECTED) {
-            //            console.log('CONNECTED ACTION');
+            //          console.log('CONNECTED ACTION');
             terminalManager.createTerminal();
         } else if (toolbarManager.status === toolbarManager.ERROR) {
-            //            console.log('ERROR ACTION');
+            //          console.log('ERROR ACTION');
             //Nulla da fare, siamo nella cacca
         }
+
         if (keepActive) {
-            toolbarManager.setStatus(toolbarManager.ACTIVE);
+            terminalManager.focus(currentTerminal);
         }
     }
 
@@ -131,60 +177,49 @@ define(function (require, exports, module) {
             terminalManager.destroy(terminalId);
         });
 
-
         $(panel).on('close-last', function () {
             currentTerminal = null;
-            toolbarManager.setStatus(toolbarManager.NOT_ACTIVE);
-            panel.toggle();
-            terminalManager.createTerminal();
+            toolbarManager.setStatus(toolbarManager.NOT_RUNNING);
         });
 
-        $('#sidebar').on('panelResizeEnd', resize);
-
-        $(terminalManager).on('title', function (evt, terminalId, title) {
-            var tabId  = terminalId.replace(/\//g, '-');
-            panel.setTabTitle(tabId, title);
+        $(terminalManager).on('new', function (evt, id) {
+            createNewTerminal(id);
+            terminalManager.focus(id);
         });
-
 
         $(terminalManager).on('connected', function () {
             toolbarManager.setStatus(toolbarManager.CONNECTED);
             terminalManager.createTerminal();
-            $(terminalManager).on('disconnected', function () {
-                toolbarManager.setStatus(toolbarManager.NOT_CONNECTED);
-            });
-        });
-
-        $(terminalManager).on('notConnected', function () {
-            toolbarManager.setStatus(toolbarManager.NOT_RUNNING);
-        });
-
-//        $(terminalManager).on('killed', function () {
-//            //ctrl+d or exit\n triggered terminal close
-//            killed = true;
-//            toolbarManager.setStatus(toolbarManager.CONNECTED);
-//            panel.toggle('close');
-//        });
-
-        $(terminalManager).on('created', function (event, terminalId) {
-            createNewTerminal(terminalId);
             first = false;
-            if (toolbarManager.status !== toolbarManager.ACTIVE) {
-                toolbarManager.setStatus(toolbarManager.NOT_ACTIVE);
-            }
+        });
+
+        $(terminalManager).on('disconnected', function () {
             if (killed) {
-                killed = false;
-                handleAction();
+                return;
             }
+            toolbarManager.setStatus(toolbarManager.ERROR);
+            console.error('Terminal disconnected unexpectedly');
         });
 
         var menu = Menus.getMenu(Menus.AppMenuBar.VIEW_MENU);
-        menu.addMenuItem(TERMINAL_COMMAND_ID, 'Ctrl-Shift-P');
+        menu.addMenuDivider();
+        menu.addMenuItem(TERMINAL_COMMAND_ID, [{key: 'Ctrl-Alt-T', platform: 'win'},
+            {key: 'Cmd-Alt-T', platform: 'mac'},
+            {key: 'Ctrl-Alt-T', platform: 'linux'}]);
         menu.addMenuItem(TERMINAL_SETTINGS_COMMAND_ID);
 
-        toolbarManager.createIcon();
-        $(toolbarManager).click(handleAction);
+        toolbarManager.init($('#main-toolbar .buttons'));
+        $(toolbarManager).on('click', function () {
+            handleAction(true);
+        });
 
-        init();
+        // Display Phoenix Code compatibility message
+        if (isPhoenixCode()) {
+            console.log('Brackets Terminal running on Phoenix Code - fully compatible');
+        }
+    });
+
+    AppInit.appReady(function () {
+        // Auto-init removed to prevent premature connection attempts
     });
 });
