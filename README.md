@@ -1,6 +1,12 @@
 Brackets Terminal
 =================
 
+## Phoenix Code / Brackets Compatible
+
+This extension is now **compatible with [Phoenix Code](https://phcode.dev/)**, the modern successor to Adobe Brackets!
+
+Phoenix Code is the next generation of Brackets with improved performance, modern web technologies, and continued community support. This terminal extension works seamlessly on both platforms.
+
 #MAINTEINER NEEDED
 I no longer use brackets as my day-to-day editor and  I'm not able to maintain this plugin anymore. I'll be happy to grant access to someone interest in doing so though - if you'd like to help, open an issue :)
 
