@@ -7,58 +7,92 @@ define(function (require, exports) {
 
     var TERMINAL_SETTINGS_CLIENT_ID = 'bracketsTerminal',
         SETTINGS = 'settings';
-    
-    // Validation constraints
+
     var CONSTRAINTS = {
         port: {
-            min: 1024,  // Avoid privileged ports
+            min: 1,
             max: 65535,
             default: 8080
         },
         fontSize: {
-            min: 8,     // Minimum readable size
-            max: 72,    // Maximum reasonable size
+            min: 8,
+            max: 72,
             default: 15
+        },
+        connectTimeoutMs: {
+            min: 500,
+            max: 30000,
+            default: 3000
         }
     };
+
+    var ALLOWED_BACKEND_MODES = ['auto', 'local-node', 'remote-tty'];
 
     var defaults = {
+        backendMode: 'auto',
+        host: 'localhost',
         port: CONSTRAINTS.port.default,
-        fontSize: CONSTRAINTS.fontSize.default
+        fontSize: CONSTRAINTS.fontSize.default,
+        webFallbackEnabled: true,
+        connectTimeoutMs: CONSTRAINTS.connectTimeoutMs.default
     };
 
-    // Validate individual setting value
-    function validateSetting(key, value) {
-        if (!CONSTRAINTS[key]) {
-            return value;
-        }
-
+    function validateNumberSetting(key, value) {
         var constraint = CONSTRAINTS[key];
-        var numValue = parseInt(value, 10);
+        var numberValue = parseInt(value, 10);
 
-        // Check if valid number
-        if (isNaN(numValue)) {
-            console.warn('[Terminal Settings] Invalid ' + key + ' value:', value, '- using default:', constraint.default);
+        if (isNaN(numberValue)) {
             return constraint.default;
         }
 
-        // Clamp to valid range
-        if (numValue < constraint.min) {
-            console.warn('[Terminal Settings] ' + key + ' too small:', numValue, '- using minimum:', constraint.min);
+        if (numberValue < constraint.min) {
             return constraint.min;
         }
 
-        if (numValue > constraint.max) {
-            console.warn('[Terminal Settings] ' + key + ' too large:', numValue, '- using maximum:', constraint.max);
+        if (numberValue > constraint.max) {
             return constraint.max;
         }
 
-        return numValue;
+        return numberValue;
+    }
+
+    function validateSetting(key, value) {
+        if (key === 'backendMode') {
+            return ALLOWED_BACKEND_MODES.indexOf(value) >= 0 ? value : defaults.backendMode;
+        }
+
+        if (key === 'host') {
+            if (typeof value !== 'string' || !value.trim()) {
+                return defaults.host;
+            }
+            return value.trim();
+        }
+
+        if (key === 'webFallbackEnabled') {
+            if (typeof value === 'string') {
+                return value.toLowerCase() === 'true';
+            }
+            return Boolean(value);
+        }
+
+        if (CONSTRAINTS[key]) {
+            return validateNumberSetting(key, value);
+        }
+
+        return value;
     }
 
     var prefs = PreferencesManager.getExtensionPrefs(TERMINAL_SETTINGS_CLIENT_ID);
     prefs.definePreference('settings', 'object', undefined, {
         keys: {
+            backendMode: {
+                type: 'string',
+                initial: defaults.backendMode
+            },
+            host: {
+                type: 'string',
+                initial: defaults.host
+            },
             port: {
                 type: 'number',
                 initial: defaults.port
@@ -66,75 +100,84 @@ define(function (require, exports) {
             fontSize: {
                 type: 'number',
                 initial: defaults.fontSize
+            },
+            webFallbackEnabled: {
+                type: 'boolean',
+                initial: defaults.webFallbackEnabled
+            },
+            connectTimeoutMs: {
+                type: 'number',
+                initial: defaults.connectTimeoutMs
             }
         }
     });
-    
+
     function _getAllValues() {
-        var settings = prefs.get(SETTINGS) || defaults;
-        
-        Object.keys(defaults).forEach(function (key) {
-            var value = settings[key];
-            if (typeof value === 'undefined') {
-                value = defaults[key];
-            }
-            // Validate on read
-            settings[key] = validateSetting(key, value);
+        var key;
+        var settings = prefs.get(SETTINGS) || {};
+
+        Object.keys(defaults).forEach(function (defaultKey) {
+            var value = typeof settings[defaultKey] === 'undefined' ? defaults[defaultKey] : settings[defaultKey];
+            settings[defaultKey] = validateSetting(defaultKey, value);
         });
+
+        for (key in settings) {
+            if (settings.hasOwnProperty(key) && !defaults.hasOwnProperty(key)) {
+                delete settings[key];
+            }
+        }
 
         return settings;
     }
-    
+
     function _setAllValues(newSettings) {
-        var oldSettings = prefs.get(SETTINGS);
-        
+        var oldSettings = _getAllValues();
+        var merged = {};
+
         Object.keys(defaults).forEach(function (key) {
-            var value = newSettings[key];
-            if (typeof value === 'undefined') {
-                newSettings[key] = oldSettings[key];
-            } else {
-                // Validate on write
-                newSettings[key] = validateSetting(key, value);
-            }
+            var value = typeof newSettings[key] === 'undefined' ? oldSettings[key] : newSettings[key];
+            merged[key] = validateSetting(key, value);
         });
 
-        prefs.set(SETTINGS, newSettings);
+        prefs.set(SETTINGS, merged);
     }
-    
+
     var settings;
 
-    var _init = function () {
+    function _init() {
         settings = _getAllValues();
-    };
+    }
 
-    var _handleSave = function () {
+    function _handleSave() {
         var inputValues = $('.brackets-terminal-settings-dialog').find('input').serializeArray();
+
         inputValues.forEach(function (configElement) {
             settings[configElement.name] = configElement.value;
         });
+
         _setAllValues(settings);
         settings = _getAllValues();
         $('#brackets-terminal-save').off('click', _handleSave);
-    };
+    }
 
-    var _showDialog = function () {
+    function _showDialog() {
         Dialogs.showModalDialogUsingTemplate(Mustache.render(dialogTemplate, settings));
         $('#brackets-terminal-save').on('click', _handleSave);
-    };
+    }
 
-    var _set = function (key, value) {
+    function _set(key, value) {
         settings[key] = validateSetting(key, value);
         _setAllValues(settings);
         settings = _getAllValues();
-    };
+    }
 
-    var _getAll = function () {
+    function _getAll() {
         return settings;
-    };
+    }
 
-    var _get = function (key) {
+    function _get(key) {
         return settings[key];
-    };
+    }
 
     _init();
 

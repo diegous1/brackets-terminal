@@ -47,11 +47,11 @@ define(function (require, exports, module) {
                 $(exportObj).trigger('close-tab', terminalId);
                 event.stopPropagation();
 
-                if (_$panel.find('.terminal').size() === 1) {
+                if (_$panel.find('.terminal').length === 1) {
                     $(exportObj).trigger('close-last');
                 } else if (isActive) {
                     toActivate = $this.closest('li').prev();
-                    if (toActivate.size() <= 0) {
+                    if (toActivate.length <= 0) {
                         toActivate = $this.closest('li').next();
                     }
                     _activateTab(toActivate.find('a'));

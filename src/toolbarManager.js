@@ -37,6 +37,19 @@ define(function () {
         this.setStatus(possibleStatus.NOT_RUNNING);
     };
 
+    toolbarManager.init = function init($container) {
+        if (this._$icon && this._$icon.length) {
+            return;
+        }
+
+        if ($container && $container.length) {
+            this.createIcon();
+            return;
+        }
+
+        this.createIcon();
+    };
+
     toolbarManager.setStatus = function (status) {
         this._$icon.removeClass();
         this._$icon.addClass(status.class);

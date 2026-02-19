@@ -17,135 +17,126 @@ define(function (require, exports, module) {
 
     var openTerminalCommand = null;
     var currentTerminal = null;
-    var serverCheckAttempts = 0;
-    var MAX_SERVER_CHECK_ATTEMPTS = 3;
+    var isConnecting = false;
 
-    // Detect if running in Phoenix Code
-    function isPhoenixCode() {
-        return (typeof Phoenix !== 'undefined' || window.Phoenix);
+    function isPhoenixNativeApp() {
+        return Boolean(window.phoenix && window.phoenix.app && window.phoenix.app.isNativeApp);
     }
 
-    var createNewTerminal = function (terminalId) {
+    function buildRemoteUrl(host, port) {
+        var hasProtocol = /^https?:\/\//i.test(host);
+        var protocol = window.location.protocol === 'https:' ? 'https://' : 'http://';
+
+        if (hasProtocol) {
+            return host;
+        }
+
+        return protocol + host + ':' + port;
+    }
+
+    function getConnectionOptions() {
+        var backendMode = settings.get('backendMode');
+        var host = settings.get('host');
+        var port = settings.get('port');
+
+        return {
+            backendMode: backendMode,
+            webFallbackEnabled: settings.get('webFallbackEnabled'),
+            connectTimeoutMs: settings.get('connectTimeoutMs'),
+            url: buildRemoteUrl(host, port)
+        };
+    }
+
+    function createNewTerminal(terminalId) {
         var $terminal = panel.addTab(terminalId);
         terminalManager.open($terminal.get()[0], terminalId);
         $('.terminal').css('font-size', settings.get('fontSize') + 'px');
-    };
+    }
 
     function resize() {
         terminalManager.handleResize(panel.$panel, currentTerminal);
     }
 
     function addToFontSize(amount) {
-        var $terminal = $('.terminal'),
-            fontsize = parseInt($terminal.css('font-size'), 10);
-        fontsize = Math.max(fontsize + amount, 1);
-        settings.set('fontSize', fontsize);
-        $terminal.css('font-size', fontsize + 'px');
+        var $terminal = $('.terminal');
+        var fontSize = parseInt($terminal.css('font-size'), 10);
+
+        fontSize = Math.max(fontSize + amount, 1);
+        settings.set('fontSize', fontSize);
+        $terminal.css('font-size', fontSize + 'px');
         resize();
     }
 
-    function checkTtyServer(callback) {
-        var serverUrl = 'http://localhost:' + settings.get('port');
-        
-        $.ajax({
-            url: serverUrl + '/terminals',
-            type: 'GET',
-            timeout: 3000,
-            success: function() {
-                serverCheckAttempts = 0;
-                if (callback) callback(true);
-            },
-            error: function(xhr, status, error) {
-                serverCheckAttempts++;
-                console.error('Terminal server connection error:', error);
-                
-                if (serverCheckAttempts >= MAX_SERVER_CHECK_ATTEMPTS) {
-                    toolbarManager.setStatus(toolbarManager.ERROR);
-                    var message = isPhoenixCode() ? 
-                        'Terminal server não está rodando. Instale o tty.js globalmente com: npm install -g tty.js' :
-                        'Terminal server is not running. Install tty.js globally: npm install -g tty.js';
-                    console.error(message);
-                    if (callback) callback(false);
-                } else {
-                    setTimeout(function() {
-                        checkTtyServer(callback);
-                    }, 2000);
-                }
-            }
-        });
+    function initializeConnection() {
+        if (isConnecting) {
+            return;
+        }
+
+        isConnecting = true;
+        toolbarManager.setStatus(toolbarManager.NOT_CONNECTED);
+        terminalManager.clear();
+
+        terminalManager.startConnection(getConnectionOptions())
+            .done(function () {
+                isConnecting = false;
+            })
+            .fail(function (error) {
+                isConnecting = false;
+                toolbarManager.setStatus(toolbarManager.ERROR);
+                console.error('[Terminal] Falha ao conectar:', error);
+            });
     }
 
-    function init() {
-        toolbarManager.setStatus(toolbarManager.NOT_RUNNING);
-        terminalManager.clear();
-        
-        // Check if server is available before attempting connection
-        checkTtyServer(function(success) {
-            if (success) {
-                terminalManager.startConnection('http://localhost:' + settings.get('port'));
-                toolbarManager.setStatus(toolbarManager.ACTIVE);
-            } else {
-                console.error('Failed to connect to terminal server after ' + MAX_SERVER_CHECK_ATTEMPTS + ' attempts');
-            }
-        });
+    function hidePanel() {
+        panel.toggle('close');
+        openTerminalCommand.setChecked(false);
+        terminalManager.blur(currentTerminal);
 
-        $(panel).on('close', function () {
-            handleAction();
-        });
+        if (toolbarManager.status === toolbarManager.ACTIVE || toolbarManager.status === toolbarManager.CONNECTED) {
+            toolbarManager.setStatus(toolbarManager.NOT_ACTIVE);
+        }
+    }
 
-        $(panel).on('command', function (evt, command) {
-            if (command && typeof shortcut[command] === 'function' && currentTerminal) {
-                shortcut[command](currentTerminal);
-                return;
-            }
+    function showPanel() {
+        panel.toggle('show');
+        openTerminalCommand.setChecked(true);
+        if (currentTerminal) {
+            terminalManager.focus(currentTerminal);
+        }
 
-            var action = command;
-            if (action && action === 'font-plus') {
-                addToFontSize(1);
-            } else if (action && action === 'font-minus') {
-                addToFontSize(-1);
-            } else if (action && action === 'new-terminal') {
-                // Fix for issue #43: Check if terminal is already being created
-                if (!terminalManager.isCreating) {
-                    terminalManager.createTerminal();
-                }
-            }
-        });
+        if (toolbarManager.status !== toolbarManager.NOT_RUNNING && toolbarManager.status !== toolbarManager.ERROR) {
+            toolbarManager.setStatus(toolbarManager.ACTIVE);
+        }
     }
 
     function handleAction(keepActive) {
-        if (toolbarManager.status === toolbarManager.NOT_RUNNING) {
-            panel.toggle();
-            toolbarManager.setStatus(toolbarManager.NOT_ACTIVE);
-            terminalManager.blur(currentTerminal);
-        } else if (toolbarManager.status === toolbarManager.NOT_ACTIVE) {
-            panel.toggle();
-            //  resize(currentTerminal);
-            terminalManager.focus(currentTerminal);
-            toolbarManager.setStatus(toolbarManager.ACTIVE);
-        } else if (toolbarManager.status === toolbarManager.NOT_CONNECTED || toolbarManager.status === toolbarManager.NOT_RUNNING) {
-            init();
-        } else if (toolbarManager.status === toolbarManager.CONNECTED) {
-            //          console.log('CONNECTED ACTION');
-            terminalManager.createTerminal();
-        } else if (toolbarManager.status === toolbarManager.ERROR) {
-            //          console.log('ERROR ACTION');
-            //Nulla da fare, siamo nella cacca
+        if (toolbarManager.status === toolbarManager.ACTIVE && !keepActive) {
+            hidePanel();
+            return;
         }
 
-        if (keepActive) {
+        if (toolbarManager.status === toolbarManager.NOT_ACTIVE) {
+            showPanel();
+            return;
+        }
+
+        if (toolbarManager.status === toolbarManager.NOT_RUNNING ||
+                toolbarManager.status === toolbarManager.NOT_CONNECTED ||
+                toolbarManager.status === toolbarManager.ERROR) {
+            showPanel();
+            initializeConnection();
+        }
+
+        if (keepActive && currentTerminal) {
             terminalManager.focus(currentTerminal);
         }
     }
-
-    var first = true;
-    var killed = false;
 
     AppInit.htmlReady(function () {
         ExtensionUtils.loadStyleSheet(module, 'terminal.css');
 
         openTerminalCommand = CommandManager.register('Show terminal', TERMINAL_COMMAND_ID, function () {
-            handleAction();
+            handleAction(false);
         });
 
         CommandManager.register('Brackets terminal settings', TERMINAL_SETTINGS_COMMAND_ID, function () {
@@ -173,6 +164,10 @@ define(function (require, exports, module) {
             openTerminalCommand.setChecked(false);
         });
 
+        $(panel).on('close', function () {
+            hidePanel();
+        });
+
         $(panel).on('close-tab', function (evt, terminalId) {
             terminalManager.destroy(terminalId);
         });
@@ -182,23 +177,48 @@ define(function (require, exports, module) {
             toolbarManager.setStatus(toolbarManager.NOT_RUNNING);
         });
 
-        $(terminalManager).on('new', function (evt, id) {
+        $(panel).on('command', function (evt, command) {
+            if (command && typeof shortcut[command] === 'function' && currentTerminal) {
+                shortcut[command](currentTerminal);
+                return;
+            }
+
+            if (command === 'font-plus') {
+                addToFontSize(1);
+                return;
+            }
+
+            if (command === 'font-minus') {
+                addToFontSize(-1);
+                return;
+            }
+
+            if (command === 'new-terminal') {
+                terminalManager.createTerminal();
+            }
+        });
+
+        $(terminalManager).on('created', function (evt, id) {
             createNewTerminal(id);
             terminalManager.focus(id);
+            toolbarManager.setStatus(toolbarManager.ACTIVE);
         });
 
         $(terminalManager).on('connected', function () {
             toolbarManager.setStatus(toolbarManager.CONNECTED);
-            terminalManager.createTerminal();
-            first = false;
+            if (!Object.keys(terminalManager.terminals).length) {
+                terminalManager.createTerminal();
+            }
         });
 
         $(terminalManager).on('disconnected', function () {
-            if (killed) {
-                return;
-            }
             toolbarManager.setStatus(toolbarManager.ERROR);
-            console.error('Terminal disconnected unexpectedly');
+            console.error('Terminal desconectado inesperadamente.');
+        });
+
+        $(terminalManager).on('notConnected', function (evt, message) {
+            toolbarManager.setStatus(toolbarManager.ERROR);
+            console.error(message || 'Não foi possível conectar ao terminal.');
         });
 
         var menu = Menus.getMenu(Menus.AppMenuBar.VIEW_MENU);
@@ -213,13 +233,10 @@ define(function (require, exports, module) {
             handleAction(true);
         });
 
-        // Display Phoenix Code compatibility message
-        if (isPhoenixCode()) {
-            console.log('Brackets Terminal running on Phoenix Code - fully compatible');
-        }
-    });
+        toolbarManager.setStatus(toolbarManager.NOT_RUNNING);
 
-    AppInit.appReady(function () {
-        // Auto-init removed to prevent premature connection attempts
+        if (isPhoenixNativeApp()) {
+            console.log('Brackets Terminal em modo Phoenix Desktop (backend local).');
+        }
     });
 });

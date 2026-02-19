@@ -1,53 +1,87 @@
 Brackets Terminal
 =================
 
-## Phoenix Code / Brackets Compatible
+## Phoenix Code + Brackets
 
-This extension is now **compatible with [Phoenix Code](https://phcode.dev/)**, the modern successor to Adobe Brackets!
+Esta extensão foi atualizada para funcionar no **Phoenix Code** e também no Brackets legado, sem mudanças visuais no plugin.
 
-Phoenix Code is the next generation of Brackets with improved performance, modern web technologies, and continued community support. This terminal extension works seamlessly on both platforms.
+## Como funciona
 
-#MAINTEINER NEEDED
-I no longer use brackets as my day-to-day editor and  I'm not able to maintain this plugin anymore. I'll be happy to grant access to someone interest in doing so though - if you'd like to help, open an issue :)
+A extensão usa dois modos de backend:
 
+1. **Phoenix Desktop (padrão)**: backend local via Node Domain + `node-pty` (sem `tty.js` global).
+2. **Phoenix Web / fallback**: conexão remota com servidor `tty.js` configurado em `host:port`.
 
-Ever wanted a real console inside your editor? This plugin is what you need!
+Configuração padrão:
+
+- `backendMode`: `auto`
+- `host`: `localhost`
+- `port`: `8080`
+- `webFallbackEnabled`: `true`
+- `connectTimeoutMs`: `3000`
+
+> Observação: no Phoenix Web você precisa de um backend remoto (ex: `tty.js`) acessível por URL compatível com o protocolo da página (HTTP/HTTPS).
+
+## Instalação (usuário final)
+
+- Abra o Phoenix > Extension Manager > Available.
+- Procure por **Brackets Terminal**.
+- Instale a extensão.
+
+## Desenvolvimento local
+
+### Requisitos
+
+- Phoenix Desktop (recomendado para backend local)
+- Node.js e npm
+
+### Rodar backend local (Phoenix Desktop)
+
+O Phoenix instala automaticamente dependências da pasta `node/` por causa de `nodeConfig.npmInstall`.
+
+Se precisar instalar manualmente:
+
+```bash
+cd node
+npm install
+```
+
+### Rodar fallback remoto (`tty.js`)
+
+```bash
+npm install -g tty.js
+tty.js --port 8080
+```
+
+Depois ajuste a porta nas configurações da extensão, se necessário.
+
+## Publicação no store do Phoenix
+
+Este repositório inclui workflow GitHub Actions em `.github/workflows/publishToPhcode.yml`.
+
+Fluxo:
+
+1. Faça commit do `package.json` com nova versão.
+2. Crie uma release com tag igual à versão (`0.6.0` ou `v0.6.0`).
+3. Ao publicar a release, o workflow envia para `publish.phcode.dev`.
+
+## Uso
+
+- Menu: `View > Show terminal`
+- Atalho: `Cmd/Ctrl + Alt + T`
+- Suporte a múltiplas abas
+- Comandos rápidos: limpar, `cd` para projeto atual, aumentar/reduzir fonte
 
 ![general screenshot](images/screenshot_1.png)
 
-You can also run another editor inside brackets!
-
 ![Nano](images/screenshot2.png)
 
+## Troubleshooting
 
-##Installation
+- **Ícone vermelho**: falha ao conectar backend (local ou remoto).
+- **No Phoenix Web sem terminal**: configure backend remoto acessível por rede e protocolo correto (HTTPS em páginas HTTPS).
+- **Backend local falhou no Desktop**: rode `npm install` em `node/` e reinicie o Phoenix.
 
-* Brackets-terminal requires a [`tty.js`](https://github.com/chjj/tty.js/) server under the hood: run `$ npm install -g tty.js`
-* Open a terminal and start the server with `$ tty.js`
-* **Bonus**: you may want to add tty.js as a startup process in order to always have it running (see their website for more on configuration)
-* Open Brackets > Extension Manager > Available and look for 'Brackets Terminal'. Hit `Install`
-* Note that `tty.js` runs on port `8080` by default. You can specify a different port by running it with `tty.js --port <another_number>` and then set the same port in View > Bracket terminal settings
+## Licença
 
-##Usage
-
-You will see a new button on the sidebar as well as a new command in the menu (`View > Show Terminal`) - and a `Cmd/Ctrl+shift+P` keyboard shortcut. If everything goes well,
-the button in the sidebar will turn green and a terminal will show up as a bottom panel.
-Starting from version 0.3, brackets terminal support multiple tab, too!
-
-
-
-##Requirement
-
-* \*nix environment (may work with Cygwin or similar, but not tested)
-* `node.js` and `npm` installed
-
-
-##Troubleshooting
-
-If, for some reason, your button turn yellow try to hit it back, it should go back to gray and another hit should open the terminal again.
-If, at startup, the button is light-gray or it becomes red - it's because the tty.js server is no longer running.
-
-##Contribution
-
-Please, report any issue on the github repository, pull requests are welcome too.
-
+MIT

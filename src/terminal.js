@@ -1,39 +1,39 @@
 /*jshint devel:true */
 define(function (require, exports, module) {
     'use strict';
-    var terminalProto = {},
-        io = require('vendor/socket-io'),
-        Terminal = require('vendor/tty');
 
-    // Security: Dangerous command patterns to warn about
+    var Terminal = require('vendor/tty'),
+        createLocalNodeTransport = require('src/transports/localNodeTransport'),
+        createRemoteTtyTransport = require('src/transports/remoteTtyTransport');
+
+    var terminalProto = {};
+
     var DANGEROUS_PATTERNS = [
-        /rm\s+-rf\s+\//, // rm -rf /
-        /rm\s+-rf\s+~/, // rm -rf ~
-        /:\(\)\{\s*:\|:\&\s*\};:/, // fork bomb
-        />\/dev\/sda/, // overwrite disk
-        /dd\s+if=\/dev\/zero\s+of=\/dev\/sda/, // wipe disk
-        /mkfs/, // format disk
-        /chmod\s+-R\s+777\s+\//, // chmod 777 root
-        /wget.*\|.*sh/, // download and execute
-        /curl.*\|.*sh/, // download and execute
-        /eval\s*\(/, // eval injection
-        /`.*`/ // command substitution
+        /rm\s+-rf\s+\//,
+        /rm\s+-rf\s+~/,
+        /:\(\)\{\s*:\|:\&\s*\};:/,
+        />\/dev\/sda/,
+        /dd\s+if=\/dev\/zero\s+of=\/dev\/sda/,
+        /mkfs/,
+        /chmod\s+-R\s+777\s+\//,
+        /wget.*\|.*sh/,
+        /curl.*\|.*sh/,
+        /eval\s*\(/,
+        /`.*`/
     ];
 
-    // Sanitize and validate commands
     function sanitizeCommand(command) {
+        var i;
+
         if (!command || typeof command !== 'string') {
             return '';
         }
 
-        // Trim and limit command length to prevent buffer overflow
         command = command.trim().substring(0, 10000);
 
-        // Check for dangerous patterns
-        for (var i = 0; i < DANGEROUS_PATTERNS.length; i++) {
+        for (i = 0; i < DANGEROUS_PATTERNS.length; i++) {
             if (DANGEROUS_PATTERNS[i].test(command)) {
-                console.warn('[Terminal Security] Potentially dangerous command detected:', command.substring(0, 100));
-                // Don't block, just warn - user has full control of their system
+                console.warn('[Terminal Security] Comando potencialmente perigoso detectado:', command.substring(0, 100));
                 break;
             }
         }
@@ -41,130 +41,149 @@ define(function (require, exports, module) {
         return command;
     }
 
-    terminalProto.connectHandler = function connectHandler() {
-        $(this).trigger('connected');
-        this.registerSocketHandler();
-    };
+    function hasNodeSupport() {
+        return window.phoenix && window.phoenix.app && window.phoenix.app.isNativeApp;
+    }
 
-    terminalProto.command = function (terminalId, command) {
-        // Sanitize command before sending
-        var sanitizedCommand = sanitizeCommand(command);
-        
-        if (!sanitizedCommand) {
-            console.error('[Terminal] Invalid command');
+    terminalProto._bindTransportEvents = function _bindTransportEvents() {
+        var self = this;
+
+        if (!this.transport) {
             return;
         }
 
-        this.socket.emit('data', terminalId, sanitizedCommand + '\n');
-        this.terminals[terminalId].focus();
-    };
-
-    terminalProto.createHandler = function createHandler(err, data) {
-        var term;
-        if (err) {
-            console.error(err);
-        }
-
-        term = new Terminal(data.cols, data.rows);
-        this.terminals[data.id] = term;
-        term.on('title', function (title) {
-            $(this).trigger('title', [data.id, title]);
-        }.bind(this));
-
-        this.registerDataHandler(data.id);
-
-        this.socket.on('kill', function () {
-            this.clear();
-            $(this).trigger('killed');
-        }.bind(this));
-
-        this.socket.on('disconnect', function () {
-            this.clear();
-            $(this).trigger('disconnected');
-        }.bind(this));
-
-        this.socket.on('reconnect_failed', function () {
-            this.clear();
+        $(this.transport).on('connected', function () {
+            $(self).trigger('connected');
         });
 
+        $(this.transport).on('created', function (event, data) {
+            self.isCreating = false;
+            self._createTerminalInstance(data);
+        });
+
+        $(this.transport).on('data', function (event, payload) {
+            if (payload && self.terminals[payload.id]) {
+                self.terminals[payload.id].write(payload.data);
+            }
+        });
+
+        $(this.transport).on('terminalExit', function (event, payload) {
+            if (payload && payload.id && self.terminals[payload.id]) {
+                self.terminals[payload.id].destroy();
+                delete self.terminals[payload.id];
+            }
+        });
+
+        $(this.transport).on('disconnect', function () {
+            self.clear();
+            $(self).trigger('disconnected');
+        });
+
+        $(this.transport).on('error', function (event, message) {
+            self.isCreating = false;
+            console.error('[Terminal] ' + message);
+            $(self).trigger('notConnected', message);
+        });
+    };
+
+    terminalProto._clearTransportEvents = function _clearTransportEvents() {
+        if (this.transport) {
+            $(this.transport).off();
+        }
+    };
+
+    terminalProto._createTerminalInstance = function _createTerminalInstance(data) {
+        var terminalId = data.id;
+        var term = new Terminal(data.cols, data.rows);
+
+        this.terminals[terminalId] = term;
+        term.on('title', function (title) {
+            $(this).trigger('title', [terminalId, title]);
+        }.bind(this));
+
+        term.on('data', function (outputData) {
+            if (this.transport) {
+                this.transport.write(terminalId, outputData);
+            }
+        }.bind(this));
+
         this.blurAll();
-        $(this).trigger('created', data.id);
+        $(this).trigger('created', terminalId);
+    };
+
+    terminalProto.command = function command(terminalId, commandLine) {
+        var sanitizedCommand = sanitizeCommand(commandLine);
+
+        if (!sanitizedCommand || !this.transport) {
+            return;
+        }
+
+        this.transport.write(terminalId, sanitizedCommand + '\n');
+        this.focus(terminalId);
     };
 
     terminalProto.handleResize = function handleResize($bashPanel, terminalId) {
-        var height,
-            width,
-            rows,
-            cols,
-            lineHeight,
-            fontSize;
+        var height;
+        var width;
+        var rows;
+        var cols;
+        var lineHeight;
+        var fontSize;
+        var $span;
 
-        if (this.terminals && this.terminals[terminalId]) {
-            height = $bashPanel.height();
-            width = $bashPanel.width();
-            height -= $bashPanel.find('.toolbar').height() + 10; //5px top/bottom border to remove
-            width -= 10; // same here :)
-
-            var $span = $('<span>X</span>');
-            $span.css({
-                position: 'absolute',
-                left: -500
-            });
-            $span.appendTo($bashPanel.find('.terminal.active').get()[0]);
-            fontSize = $span.width();
-            lineHeight = $span.outerHeight(true);
-            $span.remove();
-
-            lineHeight = parseInt(lineHeight, 10);
-            fontSize = parseInt(fontSize, 10);
-
-            rows = Math.floor(height / lineHeight);
-            cols = Math.floor(width / fontSize);
-
-            this.socket.emit('resize', terminalId, cols, rows);
-            this.terminals[terminalId].resize(cols, rows);
-            this.terminals[terminalId].showCursor(this.terminals[terminalId].x, this.terminals[terminalId].y);
+        if (!this.terminals[terminalId] || !this.transport) {
+            return;
         }
+
+        height = $bashPanel.height();
+        width = $bashPanel.width();
+        height -= $bashPanel.find('.toolbar').height() + 10;
+        width -= 10;
+
+        $span = $('<span>X</span>');
+        $span.css({
+            position: 'absolute',
+            left: -500
+        });
+        $span.appendTo($bashPanel.find('.terminal.active').get()[0]);
+        fontSize = $span.width();
+        lineHeight = $span.outerHeight(true);
+        $span.remove();
+
+        rows = Math.floor(height / parseInt(lineHeight, 10));
+        cols = Math.floor(width / parseInt(fontSize, 10));
+
+        this.transport.resize(terminalId, cols, rows);
+        this.terminals[terminalId].resize(cols, rows);
+        this.terminals[terminalId].showCursor(this.terminals[terminalId].x, this.terminals[terminalId].y);
     };
 
-    terminalProto.focus = function (terminalId) {
+    terminalProto.focus = function focus(terminalId) {
         if (this.terminals[terminalId]) {
             this.terminals[terminalId].focus();
         }
     };
 
-    terminalProto.blurAll = function () {
-        for (var termId in this.terminals) {
-            this.terminals[termId].blur();
+    terminalProto.blurAll = function blurAll() {
+        var termId;
+        for (termId in this.terminals) {
+            if (this.terminals.hasOwnProperty(termId)) {
+                this.terminals[termId].blur();
+            }
         }
     };
 
-    terminalProto.blur = function (terminalId) {
+    terminalProto.blur = function blur(terminalId) {
         if (this.terminals[terminalId]) {
             this.terminals[terminalId].blur();
         }
     };
 
-    terminalProto.registerDataHandler = function (terminalId) {
-        var that = this;
-        var emit = function (id) {
-            return function (data) {
-                that.socket.emit('data', id, data);
-            };
-        };
-
-        this.terminals[terminalId].on('data', emit(terminalId));
-    };
-
-    terminalProto.registerSocketHandler = function () {
-        this.socket.on('data', function (id, data) {
-            this.terminals[id].write(data);
-        }.bind(this));
-    };
-
-    terminalProto.destroy = function (terminalId) {
+    terminalProto.destroy = function destroy(terminalId) {
         if (this.terminals[terminalId]) {
-            this.socket.emit('kill', terminalId);
+            if (this.transport) {
+                this.transport.kill(terminalId);
+            }
             this.terminals[terminalId].destroy();
             delete this.terminals[terminalId];
         }
@@ -176,57 +195,108 @@ define(function (require, exports, module) {
         }
     };
 
-    terminalProto.clear = function () {
-        // this.id = undefined;
-    };
-
-    terminalProto.clearHandler = function () {
-        if (this.socket) {
-            this.socket.removeAllListeners('connect');
-            this.socket.removeAllListeners('reconnect');
-            this.socket.removeAllListeners('error');
-            this.socket.removeAllListeners('disconnect');
-            this.socket.removeAllListeners('data');
-        }
-    };
-
-    terminalProto.startConnection = function startConnection(host) {
-        if (typeof host !== 'string') {
-            host = 'http://localhost:8080';
-        }
-
-        if (this.socket) {
-            if (!this.socket.socket.connected) {
-                this.socket.socket.connect();
+    terminalProto.clear = function clear() {
+        var self = this;
+        Object.keys(this.terminals || {}).forEach(function (terminalId) {
+            if (self.terminals[terminalId]) {
+                self.terminals[terminalId].destroy();
             }
+        });
+        this.terminals = {};
+        this.isCreating = false;
+    };
+
+    terminalProto.startConnection = function startConnection(options) {
+        var selectedMode;
+        var previousTransport = this.transport;
+        var self = this;
+        var deferred = $.Deferred();
+        var mode = (options && options.backendMode) || 'auto';
+
+        options = options || {};
+
+        if (mode === 'auto') {
+            selectedMode = hasNodeSupport() ? 'local-node' : 'remote-tty';
+        } else {
+            selectedMode = mode;
+        }
+
+        if (selectedMode === 'local-node') {
+            this.transport = createLocalNodeTransport();
+        } else {
+            this.transport = createRemoteTtyTransport();
+        }
+
+        if (previousTransport) {
+            $(previousTransport).off();
+            if (typeof previousTransport.disconnect === 'function') {
+                previousTransport.disconnect();
+            }
+        }
+
+        this._bindTransportEvents();
+
+        this.transport.connect(options)
+            .done(function () {
+                deferred.resolve();
+            })
+            .fail(function (error) {
+                if (selectedMode === 'local-node' && options.webFallbackEnabled) {
+                    $(self.transport).off();
+                    if (typeof self.transport.disconnect === 'function') {
+                        self.transport.disconnect();
+                    }
+                    self.transport = createRemoteTtyTransport();
+                    self._bindTransportEvents();
+                    self.transport.connect(options)
+                        .done(function () {
+                            deferred.resolve();
+                        })
+                        .fail(function (fallbackError) {
+                            deferred.reject(fallbackError);
+                        });
+                    return;
+                }
+
+                deferred.reject(error);
+            });
+
+        return deferred.promise();
+    };
+
+    terminalProto.createTerminal = function createTerminal(cols, rows) {
+        var self = this;
+
+        if (!this.transport || !this.transport.isConnected()) {
+            throw new Error('Sem conexão para criar terminal.');
+        }
+
+        if (this.isCreating) {
             return;
         }
 
-        this.socket = io.connect(host, {
-            force: true
-        });
+        this.isCreating = true;
 
-        this.socket.on('error', function () {
-            this.clear();
-            $(this).trigger('notConnected');
-        }.bind(this));
-
-        this.socket.on('connect', this.connectHandler.bind(this));
-    };
-
-    terminalProto.createTerminal = function (cols, rows) {
-        if (!this.socket.socket.connected) {
-            throw new Error('Unable to create terminal without a connection');
-        }
-
-        this.terminals = this.terminals || {};
-        cols = cols || 80;
-        rows = rows || 24;
-
-        this.socket.emit('create', cols, rows, this.createHandler.bind(this));
+        this.transport.create(cols || 80, rows || 24)
+            .fail(function () {
+                self.isCreating = false;
+            });
     };
 
     module.exports = function () {
-        return Object.create(terminalProto);
+        return Object.create(terminalProto, {
+            terminals: {
+                value: {},
+                writable: true
+            },
+            isCreating: {
+                value: false,
+                writable: true
+            },
+            transport: {
+                value: null,
+                writable: true
+            }
+        });
     };
 });

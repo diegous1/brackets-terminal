@@ -9,15 +9,15 @@ define(function (require, exports, module) {
         };
 
         var cd = function (terminalId) {
-            var projectRoot = ProjectManager.getProjectRoot().fullPath;
+            var project = ProjectManager.getProjectRoot();
+            var projectRoot = project ? project.fullPath : '~';
             execute(terminalId, 'cd "' + projectRoot + '"');
         };
 
 
         return {
             clean: clean,
-            cd: cd,
-
+            cd: cd
         };
     };
 

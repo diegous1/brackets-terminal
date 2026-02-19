@@ -1,0 +1,9 @@
+{
+  "name": "brackets-terminal-node-backend",
+  "private": true,
+  "description": "Backend local do Brackets Terminal para Phoenix Desktop",
+  "version": "0.1.0",
+  "dependencies": {
+    "node-pty": "^1.1.0"
+  }
+}
