@@ -14,9 +14,9 @@ jobs:
       - name: Validate release tag version
         run: |
           TAG="$GITHUB_REF_NAME"
-          PKG_VERSION="$(node -p \"require('./package.json').version\")"
+          PKG_VERSION=$(node -p 'require("./package.json").version')
           if [ "$TAG" != "$PKG_VERSION" ] && [ "$TAG" != "v$PKG_VERSION" ]; then
-            echo "Tag '$TAG' não corresponde ao version '$PKG_VERSION' do package.json"
+            echo "Tag '$TAG' does not match version '$PKG_VERSION' in package.json"
             exit 1
           fi
       - name: release to extension store
