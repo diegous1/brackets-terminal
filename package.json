@@ -13,7 +13,7 @@
     "console",
     "shell"
   ],
-  "author": "Alessandro Artoni <artoale@gmail.com> (http://artoale.com)",
+  "author": "Diego Ramos <diegous1@gmail.com> (https://github.com/diegous1)",
   "license": "MIT",
   "engines": {
     "brackets": ">=3.0.0"
