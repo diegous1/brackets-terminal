@@ -10,7 +10,6 @@ on:
         description: 'Release tag (e.g. v0.6.0)'
         required: true
         default: 'v0.6.0'
-
 jobs:
   build-tasks:
     runs-on: ubuntu-latest
@@ -40,10 +39,8 @@ jobs:
         run: |
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
           gh release upload "${TAG}" extension.zip --clobber
-      - name: release to extension store
+      - name: release details
         run: |
-          REPO=${{ github.event.repository.full_name }}
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          REF="refs/tags/${TAG}"
-          echo "Publishing repo=$REPO ref=$REF"
-          curl --fail-with-body "https://publish.phcode.dev/publishGithubRelease?releaseRef=${REPO}:${REF}"
+          GITHUB_REF="refs/tags/${{ github.event.inputs.tag || github.ref_name }}"
+          echo "$GITHUB_REF repo=${{github.event.repository.full_name}}"
+          curl --fail-with-body https://publish.phcode.dev/publishGithubRelease?releaseRef=${{github.event.repository.full_name}}:$GITHUB_REF
