@@ -19,6 +19,7 @@
     "brackets": ">=3.0.0"
   },
   "nodeConfig": {
+    "main": "node/TerminalDomain.js",
     "npmInstall": true
   },
   "categories": ["general"],
