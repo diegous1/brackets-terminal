@@ -56,6 +56,13 @@ define(function (require, exports, module) {
                 return deferred.promise();
             }
 
+            if (socket) {
+                socket.removeAllListeners();
+                socket.disconnect();
+                socket = null;
+                connected = false;
+            }
+
             socket = io.connect(options.url, {
                 force: true,
                 'connect timeout': options.connectTimeoutMs || 3000
@@ -63,11 +70,11 @@ define(function (require, exports, module) {
 
             bindSocketEvents();
 
-            socket.on('connect', function () {
+            socket.once('connect', function () {
                 deferred.resolve();
             });
 
-            socket.on('error', function () {
+            socket.once('error', function () {
                 deferred.reject('Não foi possível conectar ao servidor tty.js.');
             });
 

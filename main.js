@@ -204,6 +204,13 @@ define(function (require, exports, module) {
             toolbarManager.setStatus(toolbarManager.ACTIVE);
         });
 
+        $(terminalManager).on('title', function (evt, terminalId, title) {
+            if (terminalId && title) {
+                var tabId = String(terminalId).replace(/\//g, '-');
+                panel.setTabTitle(tabId, title);
+            }
+        });
+
         $(terminalManager).on('connected', function () {
             toolbarManager.setStatus(toolbarManager.CONNECTED);
             if (!Object.keys(terminalManager.terminals).length) {

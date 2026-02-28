@@ -63,7 +63,7 @@ define(function (require, exports, module) {
             return deferred.promise();
         };
 
-        transport.create = function create(cols, rows) {
+        transport.create = function create(cols, rows, cwd) {
             var deferred = $.Deferred();
 
             if (!connected) {
@@ -71,7 +71,7 @@ define(function (require, exports, module) {
                 return deferred.promise();
             }
 
-            ensureDomain().exec('createTerminal', cols || 80, rows || 24)
+            ensureDomain().exec('createTerminal', cols || 80, rows || 24, cwd || '')
                 .done(function (terminalData) {
                     trigger('created', terminalData);
                     deferred.resolve(terminalData);

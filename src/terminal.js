@@ -6,6 +6,16 @@ define(function (require, exports, module) {
         createLocalNodeTransport = require('src/transports/localNodeTransport'),
         createRemoteTtyTransport = require('src/transports/remoteTtyTransport');
 
+    function getProjectRootPath() {
+        try {
+            var ProjectManager = brackets.getModule('project/ProjectManager');
+            var root = ProjectManager.getProjectRoot();
+            return root && root.fullPath ? root.fullPath : '';
+        } catch (e) {
+            return '';
+        }
+    }
+
     var terminalProto = {};
 
     var DANGEROUS_PATTERNS = [
@@ -140,12 +150,19 @@ define(function (require, exports, module) {
         height -= $bashPanel.find('.toolbar').height() + 10;
         width -= 10;
 
+        var $termEl = $bashPanel.find('.terminal.active');
+        if (!$termEl.length) {
+            $termEl = $bashPanel.find('.terminal[data-id="' + terminalId + '"]');
+        }
+        if (!$termEl.length) {
+            return;
+        }
         $span = $('<span>X</span>');
         $span.css({
             position: 'absolute',
             left: -500
         });
-        $span.appendTo($bashPanel.find('.terminal.active').get()[0]);
+        $span.appendTo($termEl.get(0));
         fontSize = $span.width();
         lineHeight = $span.outerHeight(true);
         $span.remove();
@@ -277,7 +294,8 @@ define(function (require, exports, module) {
 
         this.isCreating = true;
 
-        this.transport.create(cols || 80, rows || 24)
+        var cwd = getProjectRootPath();
+        this.transport.create(cols || 80, rows || 24, cwd)
             .fail(function () {
                 self.isCreating = false;
             });
