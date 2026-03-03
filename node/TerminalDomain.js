@@ -4,19 +4,23 @@
 
     var os = require('os');
     var pty;
-    var domainManager;
+    var nodeConnector;
     var terminals = {};
     var terminalSequence = 0;
+
+    // Phoenix Code NodeConnector ID
+    var TERMINAL_NODE_CONNECTOR_ID = 'brackets-terminal';
 
     try {
         pty = require('node-pty');
     } catch (error) {
         pty = null;
+        console.error('[Terminal Backend] Warning: node-pty dependency not found. Run npm install in node/ folder.');
     }
 
     function ensurePtyDependency() {
         if (!pty) {
-            throw new Error('Dependência node-pty ausente. Execute npm install na pasta node/ da extensão.');
+            throw new Error('[Terminal Backend] Dependência node-pty ausente. Execute npm install na pasta node/ da extensão.');
         }
     }
 
@@ -36,27 +40,30 @@
         return process.env.SHELL || '/bin/bash';
     }
 
-    function emitTerminalEvent(eventName, payload) {
-        if (!domainManager) {
+    function triggerTerminalEvent(eventName, payload) {
+        if (!nodeConnector) {
+            console.error('[Terminal Backend] NodeConnector não inicializado. Evento perdido:', eventName);
             return;
         }
 
-        domainManager.emitEvent('bracketsTerminal', eventName, [payload]);
+        console.debug('[Terminal Backend Event]', eventName, payload);
+        nodeConnector.triggerPeer('terminal' + eventName.charAt(0).toUpperCase() + eventName.slice(1), payload);
     }
 
     function trackTerminal(id, term) {
         terminals[id] = term;
+        console.log('[Terminal Backend] Terminal criado:', id);
 
         if (typeof term.onData === 'function') {
             term.onData(function (data) {
-                emitTerminalEvent('terminalData', {
+                triggerTerminalEvent('Data', {
                     id: id,
                     data: data
                 });
             });
         } else {
             term.on('data', function (data) {
-                emitTerminalEvent('terminalData', {
+                triggerTerminalEvent('Data', {
                     id: id,
                     data: data
                 });
@@ -66,20 +73,22 @@
         if (typeof term.onExit === 'function') {
             term.onExit(function (exit) {
                 delete terminals[id];
-                emitTerminalEvent('terminalExit', {
+                triggerTerminalEvent('Exit', {
                     id: id,
                     exitCode: exit.exitCode,
                     signal: exit.signal
                 });
+                console.log('[Terminal Backend] Terminal finalizado:', id);
             });
         } else {
             term.on('exit', function (code, signal) {
                 delete terminals[id];
-                emitTerminalEvent('terminalExit', {
+                triggerTerminalEvent('Exit', {
                     id: id,
                     exitCode: code,
                     signal: signal
                 });
+                console.log('[Terminal Backend] Terminal finalizado:', id);
             });
         }
     }
@@ -96,13 +105,19 @@
         shell = (typeof shell === 'string' && shell) ? shell : getDefaultShell();
 
         terminalId = 'local-' + (++terminalSequence);
-        terminal = pty.spawn(shell, [], {
-            name: 'xterm-color',
-            cols: cols,
-            rows: rows,
-            cwd: cwd,
-            env: process.env
-        });
+        
+        try {
+            terminal = pty.spawn(shell, [], {
+                name: 'xterm-color',
+                cols: cols,
+                rows: rows,
+                cwd: cwd,
+                env: process.env
+            });
+        } catch (error) {
+            console.error('[Terminal Backend] Erro ao spawnear terminal:', error);
+            throw error;
+        }
 
         trackTerminal(terminalId, terminal);
 
@@ -115,40 +130,71 @@
         };
     }
 
-    function writeTerminal(terminalId, data) {
+    async function writeTerminal(payload) {
+        var terminalId = payload.id;
+        var data = payload.data;
+        
         if (!terminals[terminalId]) {
+            console.warn('[Terminal Backend] Terminal não encontrado:', terminalId);
             return false;
         }
 
-        terminals[terminalId].write(String(data || ''));
-        return true;
+        try {
+            terminals[terminalId].write(String(data || ''));
+            return true;
+        } catch (error) {
+            console.error('[Terminal Backend] Erro ao escrever no terminal:', error);
+            return false;
+        }
     }
 
-    function resizeTerminal(terminalId, cols, rows) {
+    async function resizeTerminal(payload) {
+        var terminalId = payload.id;
+        var cols = payload.cols;
+        var rows = payload.rows;
+        
         if (!terminals[terminalId]) {
+            console.warn('[Terminal Backend] Terminal não encontrado:', terminalId);
             return false;
         }
 
-        terminals[terminalId].resize(normalizeDimension(cols, 80), normalizeDimension(rows, 24));
-        return true;
+        try {
+            terminals[terminalId].resize(normalizeDimension(cols, 80), normalizeDimension(rows, 24));
+            return true;
+        } catch (error) {
+            console.error('[Terminal Backend] Erro ao redimensionar terminal:', error);
+            return false;
+        }
     }
 
-    function killTerminal(terminalId) {
+    async function killTerminal(payload) {
+        var terminalId = payload.id;
+        
         if (!terminals[terminalId]) {
+            console.warn('[Terminal Backend] Terminal não encontrado:', terminalId);
             return false;
         }
 
-        terminals[terminalId].kill();
-        delete terminals[terminalId];
-        return true;
+        try {
+            terminals[terminalId].kill();
+            delete terminals[terminalId];
+            console.log('[Terminal Backend] Terminal finalizado:', terminalId);
+            return true;
+        } catch (error) {
+            console.error('[Terminal Backend] Erro ao finalizar terminal:', error);
+            return false;
+        }
     }
 
-    function disposeAll() {
+    async function disposeAll() {
+        console.log('[Terminal Backend] Finalizando todos os terminais...');
+        
         Object.keys(terminals).forEach(function (terminalId) {
             try {
                 terminals[terminalId].kill();
             } catch (error) {
-                emitTerminalEvent('terminalError', {
+                console.error('[Terminal Backend] Erro ao finalizar terminal:', terminalId, error.message);
+                triggerTerminalEvent('Error', {
                     id: terminalId,
                     message: error.message
                 });
@@ -156,10 +202,11 @@
         });
 
         terminals = {};
+        console.log('[Terminal Backend] Todos os terminais finalizados.');
         return true;
     }
 
-    function listShells() {
+    async function listShells() {
         var shells = [getDefaultShell()];
 
         if (process.platform !== 'win32') {
@@ -171,7 +218,8 @@
         return shells;
     }
 
-    function healthCheck() {
+    async function healthCheck() {
+        console.log('[Terminal Backend] Health check realizado.');
         return {
             ok: true,
             platform: process.platform,
@@ -180,45 +228,42 @@
         };
     }
 
-    function init(DomainManager) {
-        domainManager = DomainManager;
+    // Exportar para Phoenix Code
+    // Estas funções serão chamadas por el frontend via NodeConnector.execPeer()
+    module.exports = {
+        healthCheck: healthCheck,
+        createTerminal: createTerminal,
+        writeTerminal: writeTerminal,
+        resizeTerminal: resizeTerminal,
+        killTerminal: killTerminal,
+        disposeAll: disposeAll,
+        listShells: listShells
+    };
 
-        if (!domainManager.hasDomain('bracketsTerminal')) {
-            domainManager.registerDomain('bracketsTerminal', {
-                major: 0,
-                minor: 1
-            });
+    // Inicializar NodeConnector quando disponível, com retry caso ainda não esteja pronto
+    function initNodeConnector() {
+        try {
+            console.log('[Terminal Backend] Inicializando NodeConnector com ID:', TERMINAL_NODE_CONNECTOR_ID);
+            nodeConnector = global.createNodeConnector(TERMINAL_NODE_CONNECTOR_ID, module.exports);
+            console.log('[Terminal Backend] NodeConnector inicializado com sucesso.');
+        } catch (error) {
+            console.error('[Terminal Backend] Erro ao inicializar NodeConnector:', error);
         }
-
-        domainManager.registerEvent('bracketsTerminal', 'terminalData', [
-            {
-                name: 'payload',
-                type: 'object'
-            }
-        ]);
-
-        domainManager.registerEvent('bracketsTerminal', 'terminalExit', [
-            {
-                name: 'payload',
-                type: 'object'
-            }
-        ]);
-
-        domainManager.registerEvent('bracketsTerminal', 'terminalError', [
-            {
-                name: 'payload',
-                type: 'object'
-            }
-        ]);
-
-        domainManager.registerCommand('bracketsTerminal', 'healthCheck', healthCheck, false);
-        domainManager.registerCommand('bracketsTerminal', 'createTerminal', createTerminal, false);
-        domainManager.registerCommand('bracketsTerminal', 'writeTerminal', writeTerminal, false);
-        domainManager.registerCommand('bracketsTerminal', 'resizeTerminal', resizeTerminal, false);
-        domainManager.registerCommand('bracketsTerminal', 'killTerminal', killTerminal, false);
-        domainManager.registerCommand('bracketsTerminal', 'disposeAll', disposeAll, false);
-        domainManager.registerCommand('bracketsTerminal', 'listShells', listShells, false);
     }
 
-    exports.init = init;
+    if (global && typeof global.createNodeConnector === 'function') {
+        initNodeConnector();
+    } else {
+        var _initAttempts = 0;
+        var _retryInterval = setInterval(function () {
+            _initAttempts++;
+            if (global && typeof global.createNodeConnector === 'function') {
+                clearInterval(_retryInterval);
+                initNodeConnector();
+            } else if (_initAttempts >= 20) {
+                clearInterval(_retryInterval);
+                console.error('[Terminal Backend] global.createNodeConnector não ficou disponível após 10s. Backend não iniciado.');
+            }
+        }, 500);
+    }
 }());

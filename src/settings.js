@@ -149,11 +149,13 @@ define(function (require, exports) {
     }
 
     function _handleSave() {
-        var inputValues = $('.brackets-terminal-settings-dialog').find('input').serializeArray();
-
-        inputValues.forEach(function (configElement) {
-            settings[configElement.name] = configElement.value;
-        });
+        // read each field explicitly so we handle checkboxes correctly
+        settings.backendMode = $('.brackets-terminal-settings-dialog select[name="backendMode"]').val();
+        settings.host = $('.brackets-terminal-settings-dialog input[name="host"]').val();
+        settings.port = $('.brackets-terminal-settings-dialog input[name="port"]').val();
+        settings.fontSize = $('.brackets-terminal-settings-dialog input[name="fontSize"]').val();
+        settings.webFallbackEnabled = $('.brackets-terminal-settings-dialog input[name="webFallbackEnabled"]').is(':checked');
+        settings.connectTimeoutMs = $('.brackets-terminal-settings-dialog input[name="connectTimeoutMs"]').val();
 
         _setAllValues(settings);
         settings = _getAllValues();
@@ -161,7 +163,13 @@ define(function (require, exports) {
     }
 
     function _showDialog() {
-        Dialogs.showModalDialogUsingTemplate(Mustache.render(dialogTemplate, settings));
+        // prepare extra context for backendMode select
+        var context = $.extend({}, settings);
+        context.backendMode_auto = context.backendMode === 'auto';
+        context.backendMode_localNode = context.backendMode === 'local-node';
+        context.backendMode_remoteTty = context.backendMode === 'remote-tty';
+
+        Dialogs.showModalDialogUsingTemplate(Mustache.render(dialogTemplate, context));
         $('#brackets-terminal-save').on('click', _handleSave);
     }
 

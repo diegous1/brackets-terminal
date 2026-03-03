@@ -69,21 +69,36 @@ define(function (require, exports, module) {
 
     function initializeConnection() {
         if (isConnecting) {
+            console.warn('[BracketsTerminal] Já está conectando. Ignorando.');
             return;
         }
 
         isConnecting = true;
+        console.log('[BracketsTerminal] Iniciando conexão...');
         toolbarManager.setStatus(toolbarManager.NOT_CONNECTED);
         terminalManager.clear();
 
         terminalManager.startConnection(getConnectionOptions())
             .done(function () {
                 isConnecting = false;
+                console.log('[BracketsTerminal] Conexão bem-sucedida.');
             })
             .fail(function (error) {
                 isConnecting = false;
                 toolbarManager.setStatus(toolbarManager.ERROR);
-                console.error('[Terminal] Falha ao conectar:', error);
+                console.error('[BracketsTerminal] Falha ao conectar:', error);
+
+                // show explanatory dialog to end user
+                var Dialogs = brackets.getModule('widgets/Dialogs');
+                var DefaultDialogs = brackets.getModule('widgets/DefaultDialogs');
+                var opts = getConnectionOptions();
+                var msg = 'Não foi possível conectar ao backend do terminal.';
+                if (!opts.url) {
+                    msg += ' Nenhum endereço de servidor remoto especificado.';
+                } else {
+                    msg += ' Verifique se um servidor tty.js está acessível em ' + opts.url + ' ou se você está executando no Phoenix Desktop.';
+                }
+                Dialogs.showModalDialog(DefaultDialogs.DIALOG_ID_ERROR, 'Erro no Terminal', msg);
             });
     }
 
@@ -134,6 +149,9 @@ define(function (require, exports, module) {
 
     AppInit.htmlReady(function () {
         ExtensionUtils.loadStyleSheet(module, 'terminal.css');
+        // load dialogs module early for error reporting
+        brackets.getModule('widgets/Dialogs');
+        brackets.getModule('widgets/DefaultDialogs');
 
         openTerminalCommand = CommandManager.register('Show terminal', TERMINAL_COMMAND_ID, function () {
             handleAction(false);
@@ -194,7 +212,21 @@ define(function (require, exports, module) {
             }
 
             if (command === 'new-terminal') {
-                terminalManager.createTerminal();
+                console.log('[BracketsTerminal] Criando novo terminal...');
+                console.log('[BracketsTerminal] Estado do terminalManager:', {
+                    temTransport: !!terminalManager.transport,
+                    transporte: terminalManager.transport ? 'existe' : 'nulo',
+                    estáConectado: terminalManager.transport ? terminalManager.transport.isConnected() : 'N/A',
+                    terminaisAtivos: Object.keys(terminalManager.terminals || {}).length,
+                    estaConectando: isConnecting
+                });
+                try {
+                    terminalManager.createTerminal();
+                } catch (error) {
+                    console.error('[BracketsTerminal] Erro ao criar terminal:', error);
+                    toolbarManager.setStatus(toolbarManager.ERROR);
+                }
+                return;
             }
         });
 
@@ -243,7 +275,9 @@ define(function (require, exports, module) {
         toolbarManager.setStatus(toolbarManager.NOT_RUNNING);
 
         if (isPhoenixNativeApp()) {
-            console.log('Brackets Terminal em modo Phoenix Desktop (backend local).');
+            console.log('[BracketsTerminal] ✓ Phoenix Desktop detectado - backend local disponível (node-pty).');
+        } else {
+            console.log('[BracketsTerminal] ⚠ Phoenix Web ou navegador detectado - fallback para tty.js remoto.');
         }
     });
 });

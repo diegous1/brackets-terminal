@@ -59,25 +59,34 @@ define(function (require, exports, module) {
         var self = this;
 
         if (!this.transport) {
+            console.warn('[Terminal] bindTransportEvents chamado mas transport é null.');
             return;
         }
 
+        console.log('[Terminal] Vinculando event listeners do transport...');
+
         $(this.transport).on('connected', function () {
+            console.log('[Terminal] Transport evento: connected');
             $(self).trigger('connected');
         });
 
         $(this.transport).on('created', function (event, data) {
+            console.log('[Terminal] Transport evento: created', data);
             self.isCreating = false;
             self._createTerminalInstance(data);
         });
 
         $(this.transport).on('data', function (event, payload) {
+            console.debug('[Terminal] Transport evento: data para terminal', payload && payload.id);
             if (payload && self.terminals[payload.id]) {
                 self.terminals[payload.id].write(payload.data);
+            } else {
+                console.warn('[Terminal] Terminal não encontrado para data event:', payload && payload.id);
             }
         });
 
         $(this.transport).on('terminalExit', function (event, payload) {
+            console.log('[Terminal] Transport evento: terminalExit', payload && payload.id);
             if (payload && payload.id && self.terminals[payload.id]) {
                 self.terminals[payload.id].destroy();
                 delete self.terminals[payload.id];
@@ -85,13 +94,14 @@ define(function (require, exports, module) {
         });
 
         $(this.transport).on('disconnect', function () {
+            console.log('[Terminal] Transport evento: disconnect');
             self.clear();
             $(self).trigger('disconnected');
         });
 
         $(this.transport).on('error', function (event, message) {
+            console.error('[Terminal] Transport evento: error', message);
             self.isCreating = false;
-            console.error('[Terminal] ' + message);
             $(self).trigger('notConnected', message);
         });
     };
@@ -232,11 +242,15 @@ define(function (require, exports, module) {
 
         options = options || {};
 
+        console.log('[Terminal] startConnection chamado com opções:', { mode: mode, host: options.url });
+
         if (mode === 'auto') {
             selectedMode = hasNodeSupport() ? 'local-node' : 'remote-tty';
         } else {
             selectedMode = mode;
         }
+
+        console.log('[Terminal] Modo selecionado:', selectedMode);
 
         if (selectedMode === 'local-node') {
             this.transport = createLocalNodeTransport();
@@ -253,28 +267,39 @@ define(function (require, exports, module) {
 
         this._bindTransportEvents();
 
+        console.log('[Terminal] Conectando ao transport...');
+
         this.transport.connect(options)
             .done(function () {
+                console.log('[Terminal] Transport conectado com sucesso.');
                 deferred.resolve();
             })
             .fail(function (error) {
+                console.error('[Terminal] Falha ao conectar:', error);
+                
                 if (selectedMode === 'local-node' && options.webFallbackEnabled) {
+                    console.log('[Terminal] Tentando fallback para modo remoto...');
+                    
                     $(self.transport).off();
                     if (typeof self.transport.disconnect === 'function') {
                         self.transport.disconnect();
                     }
                     self.transport = createRemoteTtyTransport();
                     self._bindTransportEvents();
+                    
                     self.transport.connect(options)
                         .done(function () {
+                            console.log('[Terminal] Fallback remoto conectado com sucesso.');
                             deferred.resolve();
                         })
                         .fail(function (fallbackError) {
+                            console.error('[Terminal] Fallback remoto falhou:', fallbackError);
                             deferred.reject(fallbackError);
                         });
                     return;
                 }
 
+                console.error('[Terminal] Nenhum fallback disponível ou desabilitado.');
                 deferred.reject(error);
             });
 
@@ -284,19 +309,50 @@ define(function (require, exports, module) {
     terminalProto.createTerminal = function createTerminal(cols, rows) {
         var self = this;
 
-        if (!this.transport || !this.transport.isConnected()) {
-            throw new Error('Sem conexão para criar terminal.');
+        console.log('[Terminal] createTerminal chamado.');
+
+        // Se não há transporte, retornar
+        if (!this.transport) {
+            console.error('[Terminal] Nenhum transporte disponível.');
+            return;
+        }
+
+        // Se transporte não está conectado, tentar reconectar
+        if (!this.transport.isConnected()) {
+            console.warn('[Terminal] Transporte não conectado. Tentando reconectar primeiro...');
+            
+            // Tentar reconectar
+            this.startConnection({
+                backendMode: 'auto',
+                webFallbackEnabled: true,
+                connectTimeoutMs: 3000
+            }).done(function () {
+                console.log('[Terminal] Reconexão bem-sucedida. Criando terminal...');
+                self.createTerminal(cols, rows);
+            }).fail(function (error) {
+                console.error('[Terminal] Falha ao reconectar:', error);
+            });
+            
+            return;
         }
 
         if (this.isCreating) {
+            console.warn('[Terminal] Já há uma criação de terminal em andamento. Ignorando.');
             return;
         }
 
         this.isCreating = true;
 
         var cwd = getProjectRootPath();
-        this.transport.create(cols || 80, rows || 24, cwd)
-            .fail(function () {
+        console.log('[Terminal] Criando terminal com cwd:', cwd, 'cols:', cols || 80, 'rows:', rows || 24);
+
+        // Normalize return value to a real Promise (works with jQuery Deferred too)
+        Promise.resolve(this.transport.create(cols || 80, rows || 24, cwd))
+            .then(function (terminalData) {
+                console.log('[Terminal] Terminal criado com sucesso:', terminalData);
+            })
+            .catch(function (error) {
+                console.error('[Terminal] Falha ao criar terminal:', error);
                 self.isCreating = false;
             });
     };

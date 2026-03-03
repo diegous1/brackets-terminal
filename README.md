@@ -3,22 +3,27 @@ Brackets Terminal
 
 ## Phoenix Code + Brackets
 
-Esta extensão foi atualizada para funcionar no **Phoenix Code** e também no Brackets legado, sem mudanças visuais no plugin.
+Esta extensão foi atualizada para funcionar no **Phoenix Code** com a API moderna (NodeConnector), e também no Brackets legado.
+
+### 🎯 Versão Atual: 0.6.1
+
+Veja [CHANGELOG.md](CHANGELOG.md) para detalhes das mudanças.
 
 ## Como funciona
 
 A extensão usa dois modos de backend:
 
-1. **Phoenix Desktop (padrão)**: backend local via Node Domain + `node-pty` (sem `tty.js` global).
+1. **Phoenix Desktop (padrão)**: backend local via NodeConnector + `node-pty` (PTY real).
 2. **Phoenix Web / fallback**: conexão remota com servidor `tty.js` configurado em `host:port`.
 
 Configuração padrão:
 
-- `backendMode`: `auto`
-- `host`: `localhost`
-- `port`: `8080`
-- `webFallbackEnabled`: `true`
-- `connectTimeoutMs`: `3000`
+- `backendMode`: `auto` (auto, local-node ou remote-tty) – determina se o terminal usa o backend local ou um servidor tty.js remoto
+- `host`: `localhost` (servidor remoto)
+- `port`: `8080` (porta do backend remoto)
+- `fontSize`: `15` (tamanho da fonte inicial)
+- `webFallbackEnabled`: `true` (tenta fallback remoto se a conexão local falhar)
+- `connectTimeoutMs`: `3000` (timeout de conexão em milissegundos)
 
 > Observação: no Phoenix Web você precisa de um backend remoto (ex: `tty.js`) acessível por URL compatível com o protocolo da página (HTTP/HTTPS).
 
@@ -62,7 +67,7 @@ Este repositório inclui workflow GitHub Actions em `.github/workflows/publishTo
 Fluxo:
 
 1. Faça commit do `package.json` com nova versão.
-2. Crie uma release com tag igual à versão (`0.6.0` ou `v0.6.0`).
+2. Crie uma release com tag igual à versão (`0.6.1` ou `v0.6.1`).
 3. Ao publicar a release, o workflow envia para `publish.phcode.dev`.
 
 ## Uso
@@ -81,6 +86,8 @@ Fluxo:
 - **Ícone vermelho**: falha ao conectar backend (local ou remoto).
 - **No Phoenix Web sem terminal**: configure backend remoto acessível por rede e protocolo correto (HTTPS em páginas HTTPS).
 - **Backend local falhou no Desktop**: rode `npm install` em `node/` e reinicie o Phoenix.
+
+📖 **Veja [DEBUG.md](DEBUG.md)** para guia completo de troubleshooting com logs detalhados.
 
 ## Licença
 

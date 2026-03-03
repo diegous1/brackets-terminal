@@ -1,7 +1,7 @@
 {
-  "name": "github-diegous1-brackets-terminal",
+  "name": "brackets-terminal",
   "title": "Brackets Terminal",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Open a terminal inside Phoenix Code / Brackets",
   "main": "main.js",
   "homepage": "https://github.com/diegous1/brackets-terminal",
@@ -19,6 +19,7 @@
     "brackets": ">=3.0.0"
   },
   "nodeConfig": {
+    "nodeIsRequired": true,
     "main": "node/TerminalDomain.js",
     "npmInstall": true
   },
